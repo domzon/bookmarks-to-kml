@@ -16,7 +16,8 @@ import sys
 import time
 import random
 
-coords_in_content = re.compile('\/@(-?\d+\.\d+),(-?\d+\.\d+),')
+coords_in_content = re.compile(r'\/@(-?\d+\.\d+),(-?\d+\.\d+),')
+coords_in_description = re.compile(r'^(-?\d+\.\d+),(-?\d+\.\d+)$')
 user_agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.73 Safari/537.36'
 
 filename = r'GoogleBookmarks.html'
@@ -42,37 +43,43 @@ for label in doc.body.iterfind('dl/dt/h3'):
     for element, _, url, _ in label.getparent().getnext().iterlinks():
         if 'maps.google' in url:
             description = element.text or ''
-            safe_query = ['{0}={1}'.format(k, quote_plus(v))
-                          for (k, v) in parse_qsl(urlparse(url).query)]
-            url = '{0}/?{1}'.format(url.split('/?')[0], '&'.join(safe_query))
-
-            print('GET {0} {1}'.format(url, description.encode('UTF8')))
-            browser = Browser()
-
-            # Load map and find coordinates in source of page
-            sock = False
-            while not sock:
-                try:
-                    sock = browser.open(url)
-                except Exception as e:
-                    print('Connection problem:' + repr(e))
-                    print('Retrying randomly between 15 and 60 seconds.')
-                    time.sleep(random.randint(15, 60))
-
-            content = sock.read().decode("utf-8")
-            sock.close()
-
+            latitude = longitude = None
             try:
-                coords = coords_in_content.search(content).groups()
-                latitude = coords[0]
-                longitude = coords[1]
-
+                # check if the link itself contains the coordinate
+                latitude, longitude = coords_in_description.search(
+                    description).groups()
+                print("Found point {0},{1} in description".format(
+                    latitude, longitude))
             except (AttributeError, IndexError):
-                print('[Coordinates not found: ' + str(coords) +
-                      '. Try to update "user_agent"]')
-                continue
+                safe_query = ['{0}={1}'.format(k, quote_plus(v))
+                              for (k, v) in parse_qsl(urlparse(url).query)]
+                url = '{0}/?{1}'.format(url.split('/?')
+                                        [0], '&'.join(safe_query))
 
-            print(latitude, longitude)
+                print('GET {0} {1}'.format(url, description.encode('UTF8')))
+                browser = Browser()
+
+                # Load map and find coordinates in source of page
+                sock = False
+                while not sock:
+                    try:
+                        sock = browser.open(url)
+                    except Exception as e:
+                        print('Connection problem:' + repr(e))
+                        print('Retrying randomly between 15 and 60 seconds.')
+                        time.sleep(random.randint(15, 60))
+
+                content = sock.read().decode("utf-8")
+                sock.close()
+
+                try:
+                    latitude, longitude = coords_in_content.search(
+                        content).groups()
+                except (AttributeError, IndexError):
+                    print('[Coordinates not found: ({0},{1}).'
+                          'Try to update "user_agent"]'.format(latitude, longitude))
+                    continue
+
             try:
                 kml.newpoint(name=description,
                              coords=[(float(longitude), float(latitude))])
